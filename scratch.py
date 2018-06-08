@@ -17,4 +17,6 @@ a=np.linspace(0,1,5)
 print(a)
 
 a=np.eye(3)
-print(a)
+print(np.power(5,3))
+
+print([-1]*1)

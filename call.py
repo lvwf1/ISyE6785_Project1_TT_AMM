@@ -103,7 +103,7 @@ if __name__ == '__main__':
     sigma = 0.22
     T = 0.5  # unit is in years
 
-    n_periods = 3
+    n_periods = 5
     call_test = Call(S0, K, rf, divR, sigma, T)
     call_bin = call_test.BinomialTreeEuroCallPrice(n_periods)
     call_tri = call_test.TrinomialTreeEuroCallPrice(n_periods)
@@ -112,17 +112,17 @@ if __name__ == '__main__':
     print('Trinomial Tree Call option price is: ', call_tri)
     print('Black-Scholes Call option price is: ', call_bs)
 
-    axis_n = np.arange(50, 1000, 50)
-    BT_vec = [call_test.BinomialTreeEuroCallPrice(n) for n in axis_n]
-    TT_vec = [call_test.TrinomialTreeEuroCallPrice(n) for n in axis_n]
-    BS_vec = [call_bs for n in axis_n]
-    print(BT_vec)
-    print(TT_vec)
-    plt.plot(axis_n, BT_vec, 'r-', lw=2)
-    plt.plot(axis_n, TT_vec, 'g-', lw=2)
-    plt.plot(axis_n, BS_vec, 'b-', lw=2)
-    plt.xlabel("Number of Periods")
-    plt.ylabel("Option Price")
-    plt.title("European Call Option Price vs. Number of Periods in a Lattice")
-    plt.grid(True)
-    plt.show()
+    #axis_n = np.arange(50, 1000, 50)
+    #BT_vec = [call_test.BinomialTreeEuroCallPrice(n) for n in axis_n]
+    #TT_vec = [call_test.TrinomialTreeEuroCallPrice(n) for n in axis_n]
+    #BS_vec = [call_bs for n in axis_n]
+    #print(BT_vec)
+    #print(TT_vec)
+    #plt.plot(axis_n, BT_vec, 'r-', lw=2)
+    #plt.plot(axis_n, TT_vec, 'g-', lw=2)
+    #plt.plot(axis_n, BS_vec, 'b-', lw=2)
+    #plt.xlabel("Number of Periods")
+    #plt.ylabel("Option Price")
+    #plt.title("European Call Option Price vs. Number of Periods in a Lattice")
+    #plt.grid(True)
+    #plt.show()

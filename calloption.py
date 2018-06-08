@@ -43,24 +43,20 @@ class CallOption(object):
             fs_pre = fs
         return fs[0]
 
-    def BS_d1(self):
-        return (np.log(self.S0 / self.K) + (self.rf + self.sigma ** 2 / 2.0) * self.tyears) / (
+    def BS_d1(self, S=100):
+        return (np.log(S / self.K) + (self.rf + self.sigma ** 2 / 2.0) * self.tyears) / (
                     self.sigma * np.sqrt(self.tyears))
 
-    def BS_d2(self):
-        return (np.log(self.S0 / self.K) + (self.rf - self.sigma ** 2 / 2.0) * self.tyears) / (
+    def BS_d2(self,S = 100):
+        return (np.log(S / self.K) + (self.rf - self.sigma ** 2 / 2.0) * self.tyears) / (
                     self.sigma * np.sqrt(self.tyears))
 
-    def BS_CallPrice(self):
-        return self.S0 * scipy.stats.norm.cdf(self.BS_d1()) - self.K * np.exp(
-            -self.rf * self.tyears) * scipy.stats.norm.cdf(self.BS_d2())
-
-    def BS_CallPriceDO(self, H):
-        return self.BS_CallPrice() - np.power(H/self.S0,2*(self.rf-(self.sigma ** 2/2.0)))*(H**2/self.S0 * scipy.stats.norm.cdf(self.BS_d1()) - self.K * np.exp(
-            -self.rf * self.tyears) * scipy.stats.norm.cdf(self.BS_d2()))
+    def BS_CallPrice(self, S = 100):
+        return S * scipy.stats.norm.cdf(self.BS_d1(S)) - self.K * np.exp(
+            -self.rf * self.tyears) * scipy.stats.norm.cdf(self.BS_d2(S))
 
     def BS_CallPriceDI(self, H):
-        return self.BS_CallPrice()-self.BS_CallPriceDO(H)
+        return np.power(H/self.S0,2*self.rf/self.sigma**2)*self.BS_CallPrice(H**2/self.S0)
 
     def TrinomialTreeEuroCallPrice(self, N=10, H=100):
         deltaT = self.tyears / float(N)
@@ -78,35 +74,64 @@ class CallOption(object):
         fs = [0.0 for i in range(2 * N + 1)]
         fs_pre = [0.0 for i in range(2 * N + 1)]
 
-        nd_idx = 0
+        nd_idx = N
         pre_price = X0 - float(N + 1) * h
         # Compute the stock prices and option values at maturity
 
-        time_move = []
-        move = [-1, 0, 1]
-        for indices in itertools.product(range(len(tuple(move))), repeat=N):
-            time_move.append([tuple(move)[i] for i in indices])
+        move = [1,0,-1]
 
         # Compute the stock prices and option values at maturity
-        for m in time_move:
+        for indices in itertools.product(move, repeat=N):
             cur_price = X0
-            down_and_in = False
             time_counter = 0
-            for t in m:
-                cur_price = cur_price + t * h
+            down_and_in=False
+            for i in indices:
+                cur_price = cur_price + move[i] * h
                 time_counter = time_counter+1
-                if cur_price < np.log(H) :
-                    down_and_in = True
-                if time_counter == N:
-                    if (cur_price - pre_price) > h / 1000.0:
-                        stk[nd_idx] = np.exp(cur_price + alpha * self.tyears)
-                        if down_and_in:
-                            fs_pre[nd_idx] = max(stk[nd_idx] - self.K, 0)
-                        else:
-                            fs_pre[nd_idx] = 0
-                        pre_price = cur_price
-                        nd_idx = nd_idx + 1
-        #print('Call option value at maturity is: ', fs_pre)
+                if cur_price < np.log(H):
+                    down_and_in=True
+                if time_counter == N and down_and_in and (cur_price - pre_price) > h / 1000.0:
+                    stk[nd_idx] = np.exp(cur_price + alpha * self.tyears)
+                    fs_pre[nd_idx] = max(stk[nd_idx] - self.K, 0)
+                    pre_price = cur_price
+                    nd_idx = nd_idx + 1
+        print('Call option value at maturity is: ', fs_pre)
+
+        # Backward recursion for computing option prices in time periods N-1, N-2, ... , 0
+        for t in range(N - 1, -1, -1):
+            fs = []
+            cur_optP = 0.0
+            for i in range(2 * t + 1):
+                cur_optP = np.exp(-self.rf * deltaT) * (qU * fs_pre[i + 2] + qM * fs_pre[i + 1] + qD * fs_pre[i])
+                fs.append(cur_optP)
+            fs_pre = fs
+        return fs[0]
+
+    def AdaptiveMeshEuroCallPrice(self, N=10, H=100):
+        deltaT = self.tyears / float(N)
+        X0 = np.log(self.S0)
+        alpha = self.rf - self.divR - np.power(self.sigma, 2.0) / 2.0
+        h = np.sqrt(3.0 * deltaT) * self.sigma
+
+        # Initialize the stock prices and option values at maturity with 0.0
+        a_stk = [0.0 for i in range(2 * N + 1)]
+        fs = [0.0 for i in range(2 * N + 1)]
+        fs_pre = [0.0 for i in range(2 * N + 1)]
+
+        nd_idx = 0
+        pre_price = X0 - float(N + 1) * h
+        # Compute the stock prices and option values at maturity
+        for i in range(N + 1):
+            for j in range(N + 1):
+                k = max(N - i - j, 0)
+                cur_price = X0 + (i - k) * h
+                if (cur_price - pre_price) > h / 1000.0:
+                    a_stk[nd_idx] = np.exp(cur_price + alpha * self.tyears)
+                    # Compute the option value at the cur_price level
+                    fs_pre[nd_idx] = max(a_stk[nd_idx] - self.K, 0)
+                    pre_price = cur_price
+                    nd_idx = nd_idx + 1
+        print('Call option value at maturity is: ', fs_pre)
 
         # Backward recursion for computing option prices in time periods N-1, N-2, ... , 0
         for t in range(N - 1, -1, -1):
@@ -128,7 +153,7 @@ if __name__ == '__main__':
     T = 0.6  # unit is in years
 
     n_periods = 5
-    H = 99
+    H = 99.9
     call_test = CallOption(S0, K, rf, divR, sigma, T)
     call_tri = call_test.TrinomialTreeEuroCallPrice(n_periods, H)
     call_bs = call_test.BS_CallPriceDI(H)
