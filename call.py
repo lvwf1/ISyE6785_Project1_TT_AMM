@@ -96,14 +96,14 @@ class Call(object):
 
 
 if __name__ == '__main__':
-    S0 = 100.0
-    K = 110.0
-    rf = 0.03
+    S0 = 92.0
+    K = 100.0
+    rf = 0.1
     divR = 0.0
-    sigma = 0.22
-    T = 0.5  # unit is in years
+    sigma = 0.25
+    T = 1.0  # unit is in years
 
-    n_periods = 5
+    n_periods = 388
     call_test = Call(S0, K, rf, divR, sigma, T)
     call_bin = call_test.BinomialTreeEuroCallPrice(n_periods)
     call_tri = call_test.TrinomialTreeEuroCallPrice(n_periods)

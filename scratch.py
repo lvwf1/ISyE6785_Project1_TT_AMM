@@ -19,4 +19,4 @@ print(a)
 a=np.eye(3)
 print(np.power(5,3))
 
-print([-1]*1)
+print([x + 1 for x in [-1,-1,-1]])
