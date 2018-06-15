@@ -60,11 +60,8 @@ class CallOption(object):
         return self.BS_CallPrice(S0)- self.BS_CallPriceDI(S0, H)
 
     def TrinomialTreeEuroCallPriceDI(self, S0=100, N=10, H=100):
-        return self.TrinomialTreeEuroCallPrice(S0,N)-self.TrinomialTreeEuroCallPriceDO(S0,N,H)
-
-    def TrinomialTreeEuroCallPriceDO(self, S0=100, N=10, H=100):
         deltaT = self.tyears / float(N)
-        X0 = np.log(H ** 2 / S0)
+        X0 = np.log(H**2/S0)
         alpha = self.rf - self.divR - np.power(self.sigma, 2.0) / 2.0
         h = np.sqrt(3.0 * deltaT) * self.sigma
 
@@ -75,26 +72,37 @@ class CallOption(object):
 
         # Initialize the stock prices and option values at maturity with 0.0
         stk = [0.0 for i in range(2 * N + 1)]
+        fs = [0.0 for i in range(2 * N + 1)]
         fs_pre = [0.0 for i in range(2 * N + 1)]
 
-        nd_idx = 0
+        nd_idx = N
         pre_price = X0 - float(N + 1) * h
 
+        # Initialize the stock price movement
+        move = [1,0,-1]
+
         # Compute the stock prices and option values at maturity
-        for i in range(N + 1):
-            for j in range(N + 1):
-                k = max(N - i - j, 0)
-                cur_price = X0 + (i - k) * h
-                if (cur_price - pre_price) > h / 1000.0:
+        for indices in itertools.product(move, repeat=N):
+            cur_price = X0
+            time_counter = 0
+            down_and_in=False
+            for i in indices:
+                cur_price = cur_price + move[i] * h
+                time_counter = time_counter+1
+                # Only Compute the stock price if the price hits the barrier
+                if cur_price < np.log(H):
+                    down_and_in=True
+                if time_counter == N and down_and_in and (cur_price - pre_price) > h / 1000.0:
                     stk[nd_idx] = np.exp(cur_price + alpha * self.tyears)
-                    # Compute the option value at the cur_price level
-                    if stk[nd_idx] > H:
-                        fs_pre[nd_idx] = max(stk[nd_idx] - self.K, 0)
+                    fs_pre[nd_idx] = max(stk[nd_idx] - self.K, 0)
                     pre_price = cur_price
                     nd_idx = nd_idx + 1
-        print('Call option value at maturity is: ', fs_pre)
 
         return self.ComputeTrinomialTree(N, deltaT, qU, qM, qD, fs_pre)
+
+    def TrinomialTreeEuroCallPriceDO(self, S=100, N=10, H=100):
+        # Use Regular call option value minus Down-and-in call option value to get down-and-out call option value
+        return self.TrinomialTreeEuroCallPrice(S,N)-self.TrinomialTreeEuroCallPriceDI(S,N,H)
 
     def TrinomialTreeDelta(self, S0=100, N=10, e=0.01):
         deltaT = self.tyears / float(N)
@@ -438,7 +446,7 @@ if __name__ == '__main__':
     T = 0.6  # unit is in years
 
     n_periods = 10
-    H = 95
+    H = 99.9
 
     call_test = CallOption(S0, K, rf, divR, sigma, T)
     call_tri_di = call_test.TrinomialTreeEuroCallPriceDI(S0, n_periods, H)
