@@ -1,4 +1,3 @@
-import itertools
 import numpy as np
 import scipy.stats
 import math
@@ -48,59 +47,22 @@ class CallOption(object):
         return (np.log(S0 / self.K) + (self.rf + self.sigma ** 2 / 2.0) * self.tyears) / (self.sigma * np.sqrt(self.tyears))
 
     def BS_d2(self, S0 = 100):
-        return self.BS_d1(S0) - self.sigma * np.sqrt(self.tyears)
+        return (np.log(S0 / self.K) + (self.rf - self.sigma ** 2 / 2.0) * self.tyears) / (self.sigma * np.sqrt(self.tyears))
 
     def BS_CallPrice(self, S0 = 100):
         return S0 * scipy.stats.norm.cdf(self.BS_d1(S0)) - self.K * np.exp(-self.rf * self.tyears) * scipy.stats.norm.cdf(self.BS_d2(S0))
 
     def BS_CallPriceDI(self, S0 = 100, H = 90):
-        return np.power(H/S0,2*self.rf-self.sigma**2) * H**2/S0 * scipy.stats.norm.cdf((np.log(H**2/S0 / self.K) + (self.rf + self.sigma ** 2 / 2.0) * self.tyears) / (self.sigma * np.sqrt(self.tyears))) - self.K * np.exp(-self.rf * self.tyears) * scipy.stats.norm.cdf((np.log(H**2/S0 / self.K) + (self.rf + self.sigma ** 2 / 2.0) * self.tyears) / (self.sigma * np.sqrt(self.tyears)) - self.sigma * np.sqrt(self.tyears))
+        return np.power(H/S0,2*self.rf-self.sigma**2) * self.BS_CallPrice(H**2/S0)
 
     def BS_CallPriceDO(self, S0 = 100, H = 90):
         return self.BS_CallPrice(S0)- self.BS_CallPriceDI(S0, H)
 
-    def TrinomialTreeEuroCallPriceDI(self, S0=100, N=10, H=100):
-        return self.TrinomialTreeEuroCallPrice(S0,N)-self.TrinomialTreeEuroCallPriceDO(S0,N,H)
-
     def TrinomialTreeEuroCallPriceDO(self, S0=100, N=10, H=100):
         deltaT = self.tyears / float(N)
-        X0 = np.log(H ** 2 / S0)
-        alpha = self.rf - self.divR - np.power(self.sigma, 2.0) / 2.0
-        h = np.sqrt(3.0 * deltaT) * self.sigma
-
-        # Risk-neutral probabilities:
-        qU = 1.0 / 6.0
-        qM = 2.0 / 3.0
-        qD = 1.0 / 6.0
-
-        # Initialize the stock prices and option values at maturity with 0.0
-        stk = [0.0 for i in range(2 * N + 1)]
-        fs_pre = [0.0 for i in range(2 * N + 1)]
-
-        nd_idx = 0
-        pre_price = X0 - float(N + 1) * h
-
-        # Compute the stock prices and option values at maturity
-        for i in range(N + 1):
-            for j in range(N + 1):
-                k = max(N - i - j, 0)
-                cur_price = X0 + (i - k) * h
-                if (cur_price - pre_price) > h / 1000.0:
-                    stk[nd_idx] = np.exp(cur_price + alpha * self.tyears)
-                    # Compute the option value at the cur_price level
-                    if stk[nd_idx] > H:
-                        fs_pre[nd_idx] = max(stk[nd_idx] - self.K, 0)
-                    pre_price = cur_price
-                    nd_idx = nd_idx + 1
-        print('Call option value at maturity is: ', fs_pre)
-
-        return self.ComputeTrinomialTree(N, deltaT, qU, qM, qD, fs_pre)
-
-    def TrinomialTreeDelta(self, S0=100, N=10, e=0.01):
-        deltaT = self.tyears / float(N)
         X0 = np.log(S0)
         alpha = self.rf - self.divR - np.power(self.sigma, 2.0) / 2.0
-        h = np.sqrt(3.0 * deltaT) * self.sigma
+        h = X0 - np.log(H)
 
         # Risk-neutral probabilities:
         qU = 1.0 / 6.0
@@ -109,10 +71,12 @@ class CallOption(object):
 
         # Initialize the stock prices and option values at maturity with 0.0
         stk = [0.0 for i in range(2 * N + 1)]
+        fs = [0.0 for i in range(2 * N + 1)]
         fs_pre = [0.0 for i in range(2 * N + 1)]
 
-        nd_idx = 0
+        nd_idx = 2*N
         pre_price = X0 - float(N + 1) * h
+
         # Compute the stock prices and option values at maturity
         for i in range(N + 1):
             for j in range(N + 1):
@@ -123,49 +87,66 @@ class CallOption(object):
                     # Compute the option value at the cur_price level
                     fs_pre[nd_idx] = max(stk[nd_idx] - self.K, 0)
                     pre_price = cur_price
-                    nd_idx = nd_idx + 1
+                    nd_idx = nd_idx - 1
         #print('Call option value at maturity is: ', fs_pre)
 
-        fs_pre_a = [x + e for x in fs_pre]
-        fs_pre_s = [x - e for x in fs_pre]
+        # Backward recursion for computing option prices in for each time periods N-1, N-2, ... , 0
+        for t in range(1, N + 1):
+            fs = []
+            for i in range(1, 2 * (N - t) + 2):  # number of nodes at step j
+                fs.append(0.0)
+                if (t != N):
+                    if X0 + (N - t - i + 1) * h > np.log(H):
+                        fs[-1] = np.exp(-self.rf * deltaT) * (qU * fs_pre[i - 1] + qM * fs_pre[i] + qD * fs_pre[i + 1])
+                else:
+                    fs[-1] = np.exp(-self.rf * deltaT) * (qU * fs_pre[i - 1] + qM * fs_pre[i] + qD * fs_pre[i + 1])
+            fs_pre = fs
 
-        return (self.ComputeTrinomialTree(N, deltaT, qU, qM, qD, fs_pre_a) - self.ComputeTrinomialTree(N, deltaT, qU, qM, qD, fs_pre_s))/(2*e)/self.S0
+        return fs[0]
 
-    def TrinomialTreeGamma(self, S0=100, N=10, e=0.01):
-        deltaT = self.tyears / float(N)
+    def TrinomialTreeEuroCallPriceDI(self, S=100, N=10, H=100):
+        # Use Regular call option value minus Down-and-in call option value to get down-and-out call option value
+        return self.TrinomialTreeEuroCallPrice(S,N)-self.TrinomialTreeEuroCallPriceDO(S,N,H)
+
+    def TrinomialTreeEuroCallPriceRTM(self, S0=100, H=100):
+
+        startTime = time.time()
+
+        # Constant Parameters
         X0 = np.log(S0)
-        alpha = self.rf - self.divR - np.power(self.sigma, 2.0) / 2.0
-        h = np.sqrt(3.0 * deltaT) * self.sigma
+        alpha = self.rf - (self.sigma ** 2) / 2
+        h = X0 - np.log(H)
+        k = self.tyears / math.floor((3.0 * self.sigma ** 2 / h ** 2) * self.tyears)
+        N = int(self.tyears / k)
 
         # Risk-neutral probabilities:
-        qU = 1.0 / 6.0
-        qM = 2.0 / 3.0
-        qD = 1.0 / 6.0
+        [pD, pM, pU] = self.computeProbas(alpha, h, k)
 
-        # Initialize the stock prices and option values at maturity with 0.0
-        stk = [0.0 for i in range(2 * N + 1)]
-        fs_pre = [0.0 for i in range(2 * N + 1)]
+        # Initialize the stock prices and option values at maturity with X0
+        stk = [X0]
 
-        nd_idx = 0
-        pre_price = X0 - float(N + 1) * h
-        # Compute the stock prices and option values at maturity
-        for i in range(N + 1):
-            for j in range(N + 1):
-                k = max(N - i - j, 0)
-                cur_price = X0 + (i - k) * h
-                if (cur_price - pre_price) > h / 1000.0:
-                    stk[nd_idx] = np.exp(cur_price + alpha * self.tyears)
-                    # Compute the option value at the cur_price level
-                    fs_pre[nd_idx] = max(stk[nd_idx] - self.K, 0)
-                    pre_price = cur_price
-                    nd_idx = nd_idx + 1
-        #print('Call option value at maturity is: ', fs_pre)
+        for i in range(N):
+            stk = [stk[0] + h] + stk + [stk[-1] - h]
 
-        # Compute Trinomial perturbation
-        fs_pre_a = [x + e for x in fs_pre]
-        fs_pre_s = [x - e for x in fs_pre]
+        fs_pre = stk
 
-        return ((self.ComputeTrinomialTree(N, deltaT, qU, qM, qD, fs_pre_a) - self.ComputeTrinomialTree(N, deltaT, qU, qM, qD, fs_pre_s) + 2 * self.ComputeTrinomialTree(N, deltaT, qU, qM, qD, fs_pre)) / (e ** 2) - (self.ComputeTrinomialTree(N, deltaT, qU, qM, qD, fs_pre_a) - self.ComputeTrinomialTree(N, deltaT, qU, qM, qD, fs_pre_s)) / (2 * e)) / self.S0 ** 2
+        # Perform Down-And-Out Call Option Lattice
+        for i in range(2 * N + 1):
+            if stk[i] > np.log(H):
+                fs_pre[i] = max(np.exp(stk[i]) - K, 0.0)
+
+        # Backward recursion for computing option prices in for each time periods N-1, N-2, ... , 0
+        for j in range(1, N + 1):
+            fs = []
+            for i in range(1, 2 * (N - j) + 2):  # number of nodes at step j
+                fs.append(0.0)
+                if (j != N):
+                    if (np.log(S0) + (N - j - i + 1) * h > np.log(H)):
+                        fs[-1] = np.exp(-self.rf * k) * (pU * fs_pre[i - 1] + pM * fs_pre[i] + pD * fs_pre[i + 1])
+                else:
+                    fs[-1] = np.exp(-self.rf * k) * (pU * fs_pre[i - 1] + pM * fs_pre[i] + pD * fs_pre[i + 1])
+            fs_pre = fs
+        return [fs[0],time.time()-startTime]
 
     def TrinomialTreeEuroCallPrice(self, S0=100, N=10):
         deltaT = self.tyears / float(N)
@@ -182,7 +163,7 @@ class CallOption(object):
         stk = [0.0 for i in range(2 * N + 1)]
         fs_pre = [0.0 for i in range(2 * N + 1)]
 
-        nd_idx = 0
+        nd_idx = 2 * N
         pre_price = X0 - float(N + 1) * h
         # Compute the stock prices and option values at maturity
         for i in range(N + 1):
@@ -194,7 +175,7 @@ class CallOption(object):
                     # Compute the option value at the cur_price level
                     fs_pre[nd_idx] = max(stk[nd_idx] - self.K, 0)
                     pre_price = cur_price
-                    nd_idx = nd_idx + 1
+                    nd_idx = nd_idx - 1
         #print('Call option value at maturity is: ', fs_pre)
 
         return self.ComputeTrinomialTree(N, deltaT, qU, qM, qD, fs_pre)
@@ -209,181 +190,145 @@ class CallOption(object):
             fs_pre = fs
         return fs[0]
 
-    def AdaptiveMeshEuroCallPrice(self, S0=100, H=100, M=1):
+    def AdaptiveMeshEuroCallPrice(self, S0, M, H):
+
+        startTime = time.time()
+
+        # Constant Parameters
         X0 = np.log(S0)
-        alpha = self.rf - self.divR - np.power(self.sigma, 2.0) / 2.0
-        h = 2 ** M * (X0 - np.log(H))
-        k = self.tyears / math.floor((3.0 * sigma ** 2 / h ** 2)*self.tyears)
+        alpha = self.rf - (self.sigma ** 2) / 2
+        h = (2 ** M) * (X0 - np.log(H))
+        k = self.tyears / math.floor((3.0 * self.sigma ** 2 / h ** 2) * self.tyears)
         N = int(self.tyears / k)
 
-        # Initialize the stock prices and option values at maturity with 0.0
-        stk = [0.0 for i in range(2*N+1)]
-        a_mesh = [0.0 for i in range(2*N+1)]
-
-        nd_idx = 0
-        pre_price = X0 - float(N + 1) * h
-
-        # Compute the stock prices and option values at maturity
+        # Initialize the stock prices and option values at maturity with X0
+        fs_pre = []
         for i in range(N + 1):
-            for j in range(N + 1):
-                l = max(N - i - j, 0)
-                cur_price = X0 + (i - l) * h
-                if (cur_price - pre_price) > h / 1000.0:
-                    stk[nd_idx] = np.exp(cur_price + alpha * self.tyears)
-                    # Compute the option value at the cur_price level
-                    if stk[nd_idx] > H :
-                        a_mesh[nd_idx] = max(stk[nd_idx] - self.K, 0)
-                        pre_price = cur_price
-                        nd_idx = nd_idx + 1
-        #print('Call option value at maturity is: ', a_mesh)
+            stk = []
+            for j in range(2 * i + 1):
+                stk.append((np.log(H) + h - i * h) + j * h)
+            fs_pre.append(stk)
 
-        return self.ComputeAMM(H, h, k, N, a_mesh, alpha, M)
+        # Compute the payoff of the lattice A
+        fs_A = []
+        finalPayoffA = []
+        for i in range(len(fs_pre[N])):
+            finalPayoffA.append(max(np.exp(fs_pre[N][i])-self.K,0))
+            fs_A.append(finalPayoffA)
+        # Calculate Risk-neutral probabilities:
+        [pD, pM, pU] = self.computeProbas(alpha, h, k)
+        for i in range(1, N + 1):
+            opTree = []
+            for j in range(2 * (N - i) + 1):
+                if (np.exp(fs_pre[N - i][j]) > H):
+                    C = np.exp(-self.rf * k) * (pD * fs_A[0][j] + pM * fs_A[0][j + 1] + pU * fs_A[0][j + 2])
+                else:
+                    C = 0.0
+                opTree.append(C)
+            fs_A.insert(0, opTree)
+        finalValue = fs_A[0][0]
+        # Construction of the lattice B
+        delta = 0
+        gamma = 0
+        if M > 0:
+            fs_B = []
+            fs_B.append([0, 0, fs_pre[N][N]])
+            j = 1
+            B = [0, 0, 0]
+            for i in range(1, N * 4 + 1):
+                stepA = int(np.ceil(N - i / 4.0))
+                [pD, pM, pU] = self.computeProbas(alpha, h / 2, k / 4)
+                B[1] = np.exp(-self.rf * k / 4) * (pD * 0 + pM * fs_B[0][1] + pU * fs_B[0][2])
+                if (j > 0):
+                    [pD, pM, pU] = self.computeProbas(alpha, h, j * k / 4)
+                    B[2] = np.exp(-self.rf * j * k / 4) * (pD * 0 + pM * fs_A[stepA][stepA] + pU * fs_A[stepA][stepA + 1])
+                else:
+                    B[2] = fs_A[stepA][stepA]
 
-    def AdaptiveMeshDelta(self, S0=100, M=1, e=0.01):
-        X0 = np.log(S0)
-        alpha = self.rf - self.divR - np.power(self.sigma, 2.0) / 2.0
-        h = 2 ** M * (X0 - np.log(H))
-        k = self.tyears / math.floor((3.0 * sigma ** 2 / h ** 2)*self.tyears)
-        N = int(self.tyears / k)
+                fs_B.insert(0, B)
+                j += 1
+                if (j > 3):
+                    j = 0
+            finalValue = fs_B[0][1]
+            delta = (fs_B[0][2] - fs_B[0][0]) / (2.0 * h / 2 * S0)
+            gamma = (1.0 / S0 ** 2) * (((fs_B[0][2] + fs_B[0][0] - 2 * fs_B[0][1]) / (h / 2 ** 2)) - (fs_B[0][2] - fs_B[0][0]) / (2.0 * h / 2))
+            # Construction of the lattice C
+            if M > 1:
+                fs_C = []
+                fs_C.append([0, 0, fs_pre[N][N]])
+                j = 1
+                C = [0, 0, 0]
+                for i in range(1, N * 16 + 1):
+                    stepA = int(np.ceil(4 * N - i / 4.0))
+                    [pD, pM, pU] = self.computeProbas(alpha, h / 4, k / 16)
+                    C[1] = np.exp(-self.rf * k / 16) * (pD * 0 + pM * fs_C[0][1] + pU * fs_C[0][2])
+                    if (j > 0):
+                        [pD, pM, pU] = self.computeProbas(alpha, h / 2, j * k / 16)
+                        C[2] = np.exp(-self.rf * j * k / 16) * (pD * 0 + pM * fs_B[stepA][1] + pU * fs_B[stepA][2])
+                    else:
+                        C[2] = fs_B[stepA][1]
 
-        # Initialize the stock prices and option values at maturity with 0.0
-        stk = [0.0 for i in range(2*N+1)]
-        a_mesh = [0.0 for i in range(2*N+1)]
+                    fs_C.insert(0, C)
+                    j += 1
+                    if (j > 3):
+                        j = 0
+                finalValue = fs_C[0][1]
+                delta = (fs_C[0][2] - fs_C[0][0]) / (2.0 * h / 4 * S0)
+                gamma = (1.0 / S0 ** 2) * (((fs_C[0][2] + fs_C[0][0] - 2 * fs_C[0][1]) / (h / 4 ** 2)) - (fs_C[0][2] - fs_C[0][0]) / (2.0 * h / 4))
+                # Construction of the lattice D
+                if M > 2:
+                    fs_D = []
+                    fs_D.append([0, 0, 0])
+                    j = 1
+                    D = [0, 0, 0]
+                    for i in range(1, N * 64 + 1):
+                        stepA = int(np.ceil(16 * N - i / 4.0))
+                        [pD, pM, pU] = self.computeProbas(alpha, h / 8, k / 64)
+                        D[1] = np.exp(-self.rf * k / 64) * (pD * 0 + pM * fs_D[0][1] + pU * fs_D[0][2])
+                        if (j > 0):
+                            [pD, pM, pU] = self.computeProbas(alpha, h / 4, j * k / 64)
+                            D[2] = np.exp(-self.rf * j * k / 64) * (pD * 0 + pM * fs_C[stepA][1] + pU * fs_C[stepA][2])
+                        else:
+                            D[2] = fs_C[stepA][1]
 
-        nd_idx = 0
-        pre_price = X0 - float(N + 1) * h
+                        fs_D.insert(0, D)
+                        j += 1
+                        if (j > 3):
+                            j = 0
+                    finalValue = fs_D[0][1]
+                    delta = (fs_D[0][2] - fs_D[0][0]) / (2.0 * h / 8 * S0)
+                    gamma = (1.0 / S0 ** 2) * (((fs_D[0][2] + fs_D[0][0] - 2 * fs_D[0][1]) / (h / 8 ** 2)) - (fs_D[0][2] - fs_D[0][0]) / (2.0 * h / 8))
+                    # Construction of the lattice E
+                    if M > 3:
+                        fs_E = []
+                        fs_E.append([0, 0, 0])
+                        j = 1
+                        E = [0, 0, 0]
+                        for i in range(1, N * 256 + 1):
+                            stepA = int(np.ceil(16 * N - i / 4.0))
+                            [pD, pM, pU] = self.computeProbas(alpha, h / 16, k / 256)
+                            E[1] = np.exp(-self.rf * k / 256) * (pD * 0 + pM * fs_E[0][1] + pU * fs_E[0][2])
+                            if (j > 0):
+                                [pD, pM, pU] = self.computeProbas(alpha, h / 16, j * k / 256)
+                                E[2] = np.exp(-self.rf * j * k / 256) * (pD * 0 + pM * fs_D[stepA][1] + pU * fs_D[stepA][2])
+                            else:
+                                E[2] = fs_D[stepA][1]
 
-        # Compute the stock prices and option values at maturity
-        for i in range(N + 1):
-            for j in range(N + 1):
-                l = max(N - i - j, 0)
-                cur_price = X0 + (i - l) * h
-                if (cur_price - pre_price) > h / 1000.0:
-                    stk[nd_idx] = np.exp(cur_price + alpha * self.tyears)
-                    # Compute the option value at the cur_price level
-                    if stk[nd_idx] > H :
-                        a_mesh[nd_idx] = max(stk[nd_idx] - self.K, 0)
-                        pre_price = cur_price
-                        nd_idx = nd_idx + 1
-        #print('Call option value at maturity is: ', a_mesh)
+                            fs_E.insert(0, E)
+                            j += 1
+                            if (j > 3):
+                                j = 0
+                        finalValue = fs_E[0][1]
+                        delta = (fs_E[0][2] - fs_E[0][0]) / (2.0 * h / 16 * S0)
+                        gamma = (1.0 / S0 ** 2) * (((fs_E[0][2] + fs_E[0][0] - 2 * fs_E[0][1]) / (h / 16 ** 2)) - (fs_E[0][2] - fs_E[0][0]) / (2.0 * h / 17))
 
-        a_mesh_a = [x+e for x in a_mesh]
-        a_mesh_s = [x-e for x in a_mesh]
+        return [finalValue, time.time() - startTime, delta, gamma]
 
-        return (self.ComputeAMM(H, h, k, N, a_mesh_a, alpha, M)-self.ComputeAMM(H, h, k, N, a_mesh_s, alpha, M))/(2*e)/self.S0
-
-    def AdaptiveMeshGamma(self, S0=100, M=1, e=0.01):
-        X0 = np.log(S0)
-        alpha = self.rf - self.divR - np.power(self.sigma, 2.0) / 2.0
-        h = 2 ** M * (X0 - np.log(H))
-        k = self.tyears / math.floor((3.0 * sigma ** 2 / h ** 2)*self.tyears)
-        N = int(self.tyears / k)
-
-        # Initialize the stock prices and option values at maturity with 0.0
-        stk = [0.0 for i in range(2*N+1)]
-        a_mesh = [0.0 for i in range(2*N+1)]
-
-        nd_idx = 0
-        pre_price = X0 - float(N + 1) * h
-        # Compute the stock prices and option values at maturity
-        for i in range(N + 1):
-            for j in range(N + 1):
-                l = max(N - i - j, 0)
-                cur_price = X0 + (i - l) * h
-                if (cur_price - pre_price) > h / 1000.0:
-                    stk[nd_idx] = np.exp(cur_price + alpha * self.tyears)
-                    # Compute the option value at the cur_price level
-                    if stk[nd_idx] > H :
-                        a_mesh[nd_idx] = max(stk[nd_idx] - self.K, 0)
-                        pre_price = cur_price
-                        nd_idx = nd_idx + 1
-        #print('Call option value at maturity is: ', a_mesh)
-
-        a_mesh_a = [x+e for x in a_mesh]
-        a_mesh_s = [x-e for x in a_mesh]
-
-        return ((self.ComputeAMM(H, h, k, N, a_mesh_a, alpha, M)-self.ComputeAMM(H, h, k, N, a_mesh_s, alpha, M)+2*self.ComputeAMM(H, h, k, N, a_mesh, alpha, M))/(e**2)-(self.ComputeAMM(H, h, k, N, a_mesh_a, alpha, M)-self.ComputeAMM(H, h, k, N, a_mesh_s, alpha, M))/(2*e))/self.S0**2
-
-    def ComputeAMM(self, H, h, k, N, a_mesh, alpha, M):
-
-        # Initialize the mid mesh with log(H) + h / 2
-        b_mesh_mid = np.log(H) + h / 2
-        c_mesh_mid = np.log(H) + h / 4
-        d_mesh_mid = np.log(H) + h / 8
-        e_mesh_mid = np.log(H) + h / 16
-
-        # Backward recursion for computing option prices in time periods N-k, N-2k, ... , 0
-        for t in range(N):
-            pre_amesh = a_mesh
-            for t_a in range(N):
-                if t_a + 2 < N - t:
-                    a_mesh[t_a + 1] = np.exp(-self.rf * k) * (
-                                self.qU(alpha, k, h) * pre_amesh[t_a + 2] + self.qM(alpha, k, h) * pre_amesh[
-                            t_a + 1] + self.qD(alpha, k, h) * pre_amesh[t_a])
-            for t_a in range(4):
-                h_a = h
-                k_a = k * t_a / 4
-                a_mesh_mid = (np.exp(-self.rf * k_a) * (
-                            self.qU(alpha, k_a, h_a) * pre_amesh[2] + self.qM(alpha, k_a, h_a) * pre_amesh[1] + self.qD(
-                        alpha, k_a, h_a) * pre_amesh[0]))
-                if M > 0:
-                    for t_b in range(4):
-                        h_b = h / 2
-                        k_b = k / 4
-                        b_mesh_mid = (np.exp(-self.rf * k_b) * (
-                                    self.qU(alpha, k_b, h_b) * a_mesh_mid + self.qM(alpha, k_b,
-                                                                                    h_b) * b_mesh_mid + self.qD(alpha,
-                                                                                                                k_b,
-                                                                                                                h_b) *
-                                    pre_amesh[0]))
-                        if M > 1:
-                            for t_c in range(4):
-                                h_c = h / 4
-                                k_c = k / 16
-                                c_mesh_mid = (np.exp(-self.rf * k_c) * (
-                                            self.qU(alpha, k_c, h_c) * b_mesh_mid + self.qM(alpha, k_c,
-                                                                                            h_c) * c_mesh_mid + self.qD(
-                                        alpha, k_c, h_c) * pre_amesh[0]))
-                                if M > 2:
-                                    for t_d in range(4):
-                                        h_d = h / 8
-                                        k_d = k / 32
-                                        d_mesh_mid = (np.exp(-self.rf * k_d) * (
-                                                    self.qU(alpha, k_d, h_d) * c_mesh_mid + self.qM(alpha, k_d,
-                                                                                                    h_d) * d_mesh_mid + self.qD(
-                                                alpha, k_d, h_d) * pre_amesh[0]))
-                                        if M > 3:
-                                            for t_d in range(4):
-                                                h_e = h / 16
-                                                k_e = k / 64
-                                                e_mesh_mid = (np.exp(-self.rf * k_e) * (
-                                                            self.qU(alpha, k_e, h_e) * d_mesh_mid + self.qM(alpha, k_e,
-                                                                                                            h_e) * e_mesh_mid + self.qD(
-                                                        alpha, k_e, h_e) * pre_amesh[0]))
-
-        # Selectively return the final mesh value depending on mesh level
-        if M > 3:
-            return e_mesh_mid
-        elif M > 2:
-            return d_mesh_mid
-        elif M > 1:
-            return c_mesh_mid
-        elif M > 0:
-            return b_mesh_mid
-        else:
-            return a_mesh_mid
-
-    def qU(self, alpha, k, h):
-        #Compute the risk-neutral probability upward
-        return 1 / 2 * (self.sigma ** 2 * k / h ** 2 + alpha ** 2 * k ** 2 / h ** 2 + alpha * k / h)
-
-    def qD(self, alpha, k, h):
-        # Compute the risk-neutral probability downward
-        return 1 / 2 * (self.sigma ** 2 * k / h ** 2 + alpha ** 2 * k ** 2 / h ** 2 - alpha * k / h)
-
-    def qM(self, alpha, k, h):
-        # Compute the risk-neutral probability unchanged
-        return 1 - self.qU(alpha, k,h) - self.qD(alpha, k,h)
+    def computeProbas(self, alpha, h, k):
+        pU = 0.5 * ((self.sigma ** 2) * (k / (h ** 2)) + (alpha ** 2) * ((k ** 2) / (h ** 2)) + alpha * (k / h))
+        pD = 0.5 * ((self.sigma ** 2) * (k / (h ** 2)) + (alpha ** 2) * ((k ** 2) / (h ** 2)) - alpha * (k / h))
+        pM = 1 - pD - pU
+        return [pD, pM, pU]
 
     def TTDI_timer(self, S, N, H):
         start = time.time()
@@ -391,43 +336,8 @@ class CallOption(object):
         end = time.time()
         return end-start
 
-    def TTDO_timer(self, S, N, H):
-        start = time.time()
-        self.TrinomialTreeEuroCallPriceDO(S, N, H)
-        end = time.time()
-        return end-start
-
-    def AMM_timer(self, S, H, M):
-        start = time.time()
-        self.AdaptiveMeshEuroCallPrice(S,H,M)
-        end = time.time()
-        return end-start
-
-    def AMM_timer_Delta(self, H, M, e):
-        start = time.time()
-        self.AdaptiveMeshDelta(H, M, e)
-        end = time.time()
-        return end-start
-
-    def AMM_timer_Gamma(self, H, M, e):
-        start = time.time()
-        self.AdaptiveMeshGamma(H, M, e)
-        end = time.time()
-        return end-start
-
-    def TT_timer_Delta(self, S, N, e):
-        start = time.time()
-        self.TrinomialTreeDelta(S, N, e)
-        end = time.time()
-        return end - start
-
-    def TT_timer_Gamma(self, S, N, e):
-        start = time.time()
-        self.TrinomialTreeGamma(S, N,e)
-        end = time.time()
-        return end - start
-
 if __name__ == '__main__':
+
 
 #1
     S0 = 100.0
@@ -437,8 +347,8 @@ if __name__ == '__main__':
     sigma = 0.3
     T = 0.6  # unit is in years
 
-    n_periods = 10
-    H = 95
+    n_periods = 200
+    H = 99.5
 
     call_test = CallOption(S0, K, rf, divR, sigma, T)
     call_tri_di = call_test.TrinomialTreeEuroCallPriceDI(S0, n_periods, H)
@@ -451,27 +361,26 @@ if __name__ == '__main__':
     print('Black-Scholes Call down-and-out option price is: ', call_bs_do)
 
 
-    axis_n = np.arange(4, 12, 1)
+    axis_n = np.arange(50, 1000, 50)
     TTDI_vec = [call_test.TrinomialTreeEuroCallPriceDI(S0,n,H) for n in axis_n]
     TTDO_vec = [call_test.TrinomialTreeEuroCallPriceDO(S0,n,H) for n in axis_n]
     BSDI_vec = [call_test.BS_CallPriceDI(S0,H) for n in axis_n]
     BSDO_vec = [call_test.BS_CallPriceDO(S0,H) for n in axis_n]
-    print('Trinomial Tree Call down-and-in option price from 4 - 12 periods is: ',TTDI_vec)
-    print('Trinomial Tree Call down-and-out option price from 4 - 12 periods is: ',TTDO_vec)
-    print('Black-Scholes Call down-and-in option price from 4 - 12 periods is: ', BSDI_vec)
-    print('Black-Scholes Call down-and-out option price from 4 - 12 periods is: ', BSDO_vec)
+    print('Trinomial Tree Call down-and-in option price from 50 - 1000 periods is: ',TTDI_vec)
+    print('Trinomial Tree Call down-and-out option price from 50 - 1000 periods is: ',TTDO_vec)
+    print('Black-Scholes Call down-and-in option price from 50 - 1000 periods is: ', BSDI_vec)
+    print('Black-Scholes Call down-and-out option price from 50 - 1000 periods is: ', BSDO_vec)
     plt.plot(axis_n, TTDI_vec, 'r-', lw=2, label='TTDI')
-    plt.plot(axis_n, TTDO_vec, 'c-', lw=2, label='TTDO')
-    plt.plot(axis_n, BSDI_vec, 'g-', lw=2, label='BSDI')
-    plt.plot(axis_n, BSDO_vec, 'b-', lw=2, label='BSDO')
-    label = ['TTDI','TTDO','BSDI','BSDO']
+    plt.plot(axis_n, BSDI_vec, 'b-', lw=2, label='BSDI')
+    label = ['TTDI','BSDI']
     plt.xlabel("Number of Periods")
     plt.ylabel("Option Price")
-    plt.title("European Call Option Price vs. Number of Periods in a Lattice")
+    plt.title("European Call Down-And-In Option Price vs. Number of Periods in a Lattice")
     plt.legend(label)
     plt.grid(True)
     plt.show()
-    axis_h = np.array([95, 99, 99.9])
+
+    axis_h = np.array([95, 99.5, 99.9])
     TTDI_vec2 = np.array([call_test.TrinomialTreeEuroCallPriceDI(S0, n_periods, H) for H in axis_h])
     BSDI_vec2 = np.array([call_test.BS_CallPriceDI(S0,H) for H in axis_h])
     plt.plot(axis_h, TTDI_vec2/BSDI_vec2, 'r-', lw=2)
@@ -483,6 +392,8 @@ if __name__ == '__main__':
     plt.grid(True)
     plt.show()
     TTDI_vec3 = np.array([call_test.TTDI_timer(S0, n_periods, H) for H in axis_h])
+    TTDI_vec4 = np.array([call_test.TTDI_timer(S0, n_periods, H) for n_periods in axis_n])
+    plt.subplot(211)
     plt.plot(axis_h, TTDI_vec3, 'b-', lw=2)
     label = ['TTDI Computation Time']
     plt.xlabel("Barrier Option")
@@ -490,7 +401,16 @@ if __name__ == '__main__':
     plt.title("Computational Time vs. Barrier Option")
     plt.legend(label)
     plt.grid(True)
+    plt.subplot(212)
+    plt.plot(axis_n, TTDI_vec4, 'b-', lw=2)
+    label = ['TTDI Computation Time']
+    plt.xlabel("Time Steps")
+    plt.ylabel("Computational Time")
+    plt.title("Computational Time vs. Number of Time Steps")
+    plt.legend(label)
+    plt.grid(True)
     plt.show()
+
 
 #2
     S0 = 92
@@ -502,24 +422,27 @@ if __name__ == '__main__':
 
     n_periods = 10
     H = 90
-    M = 1
 
     call_test2 = CallOption(S0, K, rf, divR, sigma, T)
 
-
-    axis_s = [92,91,90.5,90.25,90.125]
-    axis_sn = [(92,4), (91,6), (90.5,8), (90.25,10), (90.125,12)]
-    axis_sm = [(92,0), (91,1), (90.5,2), (90.25,3), (90.125,4)]
+    axis_s = [92,91,90.5,90.25]
+    axis_sn = [92,91,90.5,90.25]
+    axis_sm = [(92,0), (91,1),(90.5,2),(90.25,3),(90.125,4)]
     BS_vec = [call_test2.BS_CallPriceDO(s,H) for s in axis_s]
     print('Black-Scholes Call down-and-out option price from 92, 91, 90, 90.5, 90.25, 90.125 barrier is: ',BS_vec)
-    TT_vec = [call_test2.TrinomialTreeEuroCallPriceDO(s,n,H) for (s,n) in axis_sn]
-    print('Trinomial Tree Call down-and-out option price from 92, 91, 90, 90.5, 90.25, 90.125 barrier is: ',TT_vec)
-    AMM_vec = [call_test2.AdaptiveMeshEuroCallPrice(s,H,M) for (s,M) in axis_sm]
-    print('Adaptive Mesh Call down-and-out option price from 92, 91, 90, 90.5, 90.25, 90.125 barrier with 0,1,2,3,4 mesh level is: ',AMM_vec)
+    TT_vec = [call_test2.TrinomialTreeEuroCallPriceRTM(s,H) for s in axis_sn]
+    print('Trinomial Tree Call down-and-out option price from 92, 91, 90, 90.5, 90.25, 90.125 barrier is: ',[vec[0] for vec in TT_vec])
+    print('Trinomial Tree Call computation time from 92, 91, 90, 90.5, 90.25, 90.125 barrier is: ',[vec[1] for vec in TT_vec])
+    AMM_vec = [call_test2.AdaptiveMeshEuroCallPrice(s,M,H) for (s,M) in axis_sm]
+    print(AMM_vec)
+    print('Adaptive Mesh Call down-and-out option price from 92, 91, 90, 90.5, 90.25, 90.125 barrier with 0,1,2,3,4 mesh level is: ',[vec[0] for vec in AMM_vec])
+    print('Adaptive Mesh Call computation time from 92, 91, 90, 90.5, 90.25, 90.125 barrier with 0,1,2,3,4 mesh level is: ',[vec[1] for vec in AMM_vec])
+    print('Adaptive Mesh Call Delta from 92, 91, 90, 90.5, 90.25, 90.125 barrier with 0,1,2,3,4 mesh level is: ',[vec[2] for vec in AMM_vec])
+    print('Adaptive Mesh Call Gamma from 92, 91, 90, 90.5, 90.25, 90.125 barrier with 0,1,2,3,4 mesh level is: ',[vec[3] for vec in AMM_vec])
 
     plt.subplot(211)
     plt.plot(axis_s, BS_vec, 'r-', lw=2, label='BS')
-    plt.plot(axis_s, AMM_vec, 'b-', lw=2, label='AMM')
+    plt.plot(axis_s, [vec[0] for vec in AMM_vec], 'b-', lw=2, label='AMM')
     label = ['BS', 'AMM']
     plt.xlabel("Current Price")
     plt.ylabel("Option Price")
@@ -529,7 +452,7 @@ if __name__ == '__main__':
 
     plt.subplot(212)
     plt.plot(axis_s, BS_vec, 'r-', lw=2, label='BS')
-    plt.plot(axis_s, TT_vec, 'b-', lw=2, label='TT')
+    plt.plot(axis_s, [vec[0] for vec in TT_vec], 'b-', lw=2, label='TT')
     label = ['BS', 'TT']
     plt.xlabel("Current Price")
     plt.ylabel("Option Price")
@@ -538,12 +461,8 @@ if __name__ == '__main__':
     plt.grid(True)
     plt.show()
 
-
-    TT_time_vec=[call_test2.TTDO_timer(s,n,H) for (s,n) in axis_sn]
-    AMM_time_vec=[call_test2.AMM_timer(s,H,M) for (s,M) in axis_sm]
-
-    plt.plot(axis_s, TT_time_vec, 'r-', lw=2, label='TT')
-    plt.plot(axis_s, AMM_time_vec, 'b-', lw=2, label='AMM')
+    plt.plot(axis_s, [vec[1] for vec in TT_vec], 'r-', lw=2, label='TT')
+    plt.plot(axis_s, [vec[1] for vec in AMM_vec], 'b-', lw=2, label='AMM')
     label = ['TT', 'AMM']
     plt.xlabel("Barrier Option")
     plt.ylabel("Computation Time")
@@ -553,32 +472,13 @@ if __name__ == '__main__':
     plt.show()
 
 #3
-    S0 = 90.5
-    K = 100.0
-    rf = 0.1
-    divR = 0.0
-    sigma = 0.25
-    T = 1.0  # unit is in years
 
-    n_periods = 10
-    H = 90
-    M = 2
-
-    call_test3 = CallOption(S0, K, rf, divR, sigma, T)
-    AMM_delta_vec = [call_test3.AMM_timer_Delta(S0,M,e) for (S0,M,e) in [(92,0,0.01),(91,1,0.01),(90.5,2,0.01),(90.25,3,0.01)]]
-    print('Adaptive Mesh Delta for Mesh 92, 91, 90.5, 90.25 with e=0.01 is: ', AMM_delta_vec)
-    AMM_gamma_vec = [call_test3.AMM_timer_Gamma(S0,M,e) for (S0,M,e) in [(92,0,0.01),(91,1,0.01),(90.5,2,0.01),(90.25,3,0.01)]]
-    print('Adaptive Mesh Gamma for Mesh 92, 91, 90.5, 90.25 with e=0.01 is: ', AMM_gamma_vec)
-    TT_delta_vec = [call_test3.TT_timer_Delta(S0,n,e) for n,e in [(25,0.01),(50,0.01),(250,0.01),(1000,0.01)]]
-    print('Trinomial Tree Delta for n=25 n=50 n=250 n=1000 with e=0.01 is: ', TT_delta_vec)
-    TT_gamma_vec = [call_test3.TT_timer_Gamma(S0,n,e) for n,e in [(25,0.01),(50,0.01),(250,0.01),(1000,0.01)]]
-    print('Trinomial Tree Gamma for n=25 n=50 n=250 n=1000 with e=0.01 is: ', TT_gamma_vec)
     axis_time = [0,1,2,3]
-    plt.plot(axis_time, AMM_delta_vec, 'r-', lw=2, label='Delta')
-    plt.plot(axis_time, AMM_gamma_vec, 'b-', lw=2, label='Gamma')
+    plt.plot(axis_time, [vec[2] for vec in AMM_vec], 'r-', lw=2, label='Delta')
+    plt.plot(axis_time, [vec[3] for vec in AMM_vec], 'b-', lw=2, label='Gamma')
     label = ['Delta','Gamma']
     plt.xlabel("Level of Mesh")
-    plt.ylabel("Computation time for Delta and Gamma")
+    plt.ylabel("Delta and Gamma Value")
     plt.title("Adaptive Mesh Delta and Gamma vs. Level Of Mesh")
     plt.legend(label)
     plt.grid(True)
